@@ -2,6 +2,11 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+#include "address_map_arm.h"
+#include "interrupt_ID.h"
+#include "defines.h"
+#include "exceptions.h"
+
 #define SCREEN_X 320
 #define SCREEN_Y 240
 
@@ -21,6 +26,13 @@ void plot_pixel(int x, int y, short int color);
 void swap(int* x, int* y);
 
 int main(void) {
+    disable_A9_interrupts ();	// disable interrupts in the A9 processor
+    set_A9_IRQ_stack ();			// initialize the stack pointer for IRQ mode
+    config_GIC ();					// configure the general interrupt controller
+    config_KEYs ();				// configure pushbutton KEYs to generate interrupts
+
+    enable_A9_interrupts ();	// enable interrupts in the A9 processor
+
     volatile int * pixel_ctrl_ptr = (int *)0xFF203020;
 
     //initialize the game board, represents the screen. Each pixel here will
@@ -31,7 +43,8 @@ int main(void) {
     int player_x[NUM_PLAYERS] = {BOARD_X/8, BOARD_X - BOARD_X/8, BOARD_X/8, BOARD_X - BOARD_X/8};
     int player_y[NUM_PLAYERS] = {BOARD_Y/8, BOARD_Y - BOARD_Y/8, BOARD_Y - BOARD_Y/8, BOARD_Y/8};
 
-    for(int i = 0; i < NUM_PLAYERS; i++) {
+    int i;
+    for(i = 0; i < NUM_PLAYERS; i++) {
       game_board[ player_x[i] ][ player_y[i] ] = i + 1;
     }
 
@@ -88,8 +101,9 @@ void draw_board(int game_board[BOARD_X][BOARD_Y]) {
   int board_to_screen_factor = SCREEN_X / BOARD_X;
   short int player_colors[NUM_PLAYERS] = {0x07E0, 0xF800, 0x001F, 0xF81F};
 
-  for(int x = 0; x < SCREEN_X; x+= board_to_screen_factor) {
-    for(int y = 0; y < SCREEN_Y; y+= board_to_screen_factor) {
+  int x, y;
+  for(x = 0; x < SCREEN_X; x+= board_to_screen_factor) {
+    for(y = 0; y < SCREEN_Y; y+= board_to_screen_factor) {
       switch(game_board[x/board_to_screen_factor][y/board_to_screen_factor]) {
         case 0: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, 0x0000); break;
         case 1: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, player_colors[0]); break;
