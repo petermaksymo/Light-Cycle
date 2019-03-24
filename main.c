@@ -9,6 +9,8 @@
 #include "main.h"
 
 volatile int pixel_buffer_start; // global variable
+int player_dx = 0;
+int player_dy = 0;
 
 int main(void) {
     disable_A9_interrupts ();	// disable interrupts in the A9 processor
@@ -28,11 +30,6 @@ int main(void) {
     int player_x[NUM_PLAYERS] = {BOARD_X/8, BOARD_X - BOARD_X/8, BOARD_X/8, BOARD_X - BOARD_X/8};
     int player_y[NUM_PLAYERS] = {BOARD_Y/8, BOARD_Y - BOARD_Y/8, BOARD_Y - BOARD_Y/8, BOARD_Y/8};
 
-    int i;
-    for(i = 0; i < NUM_PLAYERS; i++) {
-      game_board[ player_x[i] ][ player_y[i] ] = i + 1;
-    }
-
     /* set front pixel buffer to start of FPGA On-chip memory */
     *(pixel_ctrl_ptr + 1) = FPGA_PIXEL_BUF_BASE; // first store the address in the
                                         // back buffer
@@ -45,13 +42,18 @@ int main(void) {
     *(pixel_ctrl_ptr + 1) = SDRAM_BASE;
     pixel_buffer_start = *(pixel_ctrl_ptr + 1); // we draw on the back buffer
 
-    int test = 0;
     while (1) {
-    //  clear_screen();
+        int i;
+        for(i = 0; i < NUM_PLAYERS; i++) {
+          game_board[ player_x[i] ][ player_y[i] ] = i + 1;
+        }
         draw_board(game_board);
 
         wait_for_vsync(); // swap front and back buffers on VGA vertical sync
         pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer
+
+        player_x[0] += player_dx;
+        player_y[0] += player_dy;
     }
 }
 
@@ -175,14 +177,23 @@ void pushbutton_ISR( void )
 	press = *(KEY_ptr + 3);					// read the pushbutton interrupt register
 	*(KEY_ptr + 3) = press;					// Clear the interrupt
 
-	if (press & 0x1)							// KEY0
+	if (press & 0x1) {				// KEY0
 		LED_bits = 0b1;
-	else if (press & 0x2)					// KEY1
+    player_dx = 1;
+    player_dy = 0;
+	} else if (press & 0x2)	{				// KEY1
 		LED_bits = 0b10;
-	else if (press & 0x4)
+    player_dx = -1;
+    player_dy = 0;
+	} else if (press & 0x4) {
 		LED_bits = 0b100;
-	else if (press & 0x8)
+    player_dy = -1;
+    player_dx = 0;
+	} else if (press & 0x8) {
 		LED_bits = 0b1000;
+    player_dy = 1;
+    player_dx = 0;
+  }
 
 	*LED_ptr = LED_bits;
 	return;
