@@ -4,14 +4,13 @@
 #include "interrupt_ID.h"
 #include "defines.h"
 #include "exceptions.h"
+#include "main.h"
 
 /* This file:
  * 1. defines exception vectors for the A9 processor
  * 2. provides code that sets the IRQ mode stack, and that dis/enables interrupts
  * 3. provides code that initializes the generic interrupt controller
 */
-// void pushbutton_ISR (void);
-// void config_interrupt (int, int);
 
 // Define the IRQ exception handler
 void __attribute__ ((interrupt)) __cs3_isr_irq (void)
@@ -159,26 +158,4 @@ void config_KEYs()
 	volatile int * KEY_ptr = (int *) KEY_BASE;	// pushbutton KEY base address
 
 	*(KEY_ptr + 2) = 0xF; 	// enable interrupts for the two KEYs
-}
-
-void pushbutton_ISR( void )
-{
-	volatile int * KEY_ptr = (int *) KEY_BASE;
-	volatile int * LED_ptr = (int *) LED_BASE;
-	int press, LED_bits;
-
-	press = *(KEY_ptr + 3);					// read the pushbutton interrupt register
-	*(KEY_ptr + 3) = press;					// Clear the interrupt
-
-	if (press & 0x1)							// KEY0
-		LED_bits = 0b1;
-	else if (press & 0x2)					// KEY1
-		LED_bits = 0b10;
-	else if (press & 0x4)
-		LED_bits = 0b100;
-	else if (press & 0x8)
-		LED_bits = 0b1000;
-
-	*LED_ptr = LED_bits;
-	return;
 }

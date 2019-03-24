@@ -6,24 +6,9 @@
 #include "interrupt_ID.h"
 #include "defines.h"
 #include "exceptions.h"
-
-#define SCREEN_X 320
-#define SCREEN_Y 240
-
-#define BOARD_X 80
-#define BOARD_Y 60
-
-#define NUM_PLAYERS 4
+#include "main.h"
 
 volatile int pixel_buffer_start; // global variable
-
-void clear_screen();
-void wait_for_vsync();
-void draw_board(int game_board[BOARD_X][BOARD_Y]);
-void draw_line(int x0, int y0, int  x1, int y1, short int line_color);
-void draw_rectangle(int x, int y, int width, int height, short int color);
-void plot_pixel(int x, int y, short int color);
-void swap(int* x, int* y);
 
 int main(void) {
     disable_A9_interrupts ();	// disable interrupts in the A9 processor
@@ -33,7 +18,7 @@ int main(void) {
 
     enable_A9_interrupts ();	// enable interrupts in the A9 processor
 
-    volatile int * pixel_ctrl_ptr = (int *)0xFF203020;
+    volatile int * pixel_ctrl_ptr = (int *)PIXEL_BUF_CTRL_BASE;
 
     //initialize the game board, represents the screen. Each pixel here will
     //contain the player number or 0 for none
@@ -49,7 +34,7 @@ int main(void) {
     }
 
     /* set front pixel buffer to start of FPGA On-chip memory */
-    *(pixel_ctrl_ptr + 1) = 0xC8000000; // first store the address in the
+    *(pixel_ctrl_ptr + 1) = FPGA_PIXEL_BUF_BASE; // first store the address in the
                                         // back buffer
     /* now, swap the front/back buffers, to set the front buffer location */
     wait_for_vsync();
@@ -57,7 +42,7 @@ int main(void) {
     pixel_buffer_start = *pixel_ctrl_ptr;
     clear_screen(); // pixel_buffer_start points to the pixel buffer
     /* set back pixel buffer to start of SDRAM memory */
-    *(pixel_ctrl_ptr + 1) = 0xC0000000;
+    *(pixel_ctrl_ptr + 1) = SDRAM_BASE;
     pixel_buffer_start = *(pixel_ctrl_ptr + 1); // we draw on the back buffer
 
     int test = 0;
@@ -84,7 +69,7 @@ void clear_screen() {
 
 //waits for vsync
 void wait_for_vsync() {
-  volatile int * pixel_ctrl_ptr = (int *)0xFF203020;
+  volatile int * pixel_ctrl_ptr = (int *)PIXEL_BUF_CTRL_BASE;
   register int status;
 
   *pixel_ctrl_ptr = 1; // start the synchronization process
@@ -179,4 +164,26 @@ void swap(int* x, int* y) {
   int temp = *y;
   *y = *x;
   *x = temp;
+}
+
+void pushbutton_ISR( void )
+{
+	volatile int * KEY_ptr = (int *) KEY_BASE;
+	volatile int * LED_ptr = (int *) LED_BASE;
+	int press, LED_bits;
+
+	press = *(KEY_ptr + 3);					// read the pushbutton interrupt register
+	*(KEY_ptr + 3) = press;					// Clear the interrupt
+
+	if (press & 0x1)							// KEY0
+		LED_bits = 0b1;
+	else if (press & 0x2)					// KEY1
+		LED_bits = 0b10;
+	else if (press & 0x4)
+		LED_bits = 0b100;
+	else if (press & 0x8)
+		LED_bits = 0b1000;
+
+	*LED_ptr = LED_bits;
+	return;
 }
