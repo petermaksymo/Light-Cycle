@@ -5,32 +5,34 @@
 #define SCREEN_X 320
 #define SCREEN_Y 240
 
-#define TOTAL_RECTANGLES 8
+#define BOARD_X 80
+#define BOARD_Y 60
+
+#define NUM_PLAYERS 4
 
 volatile int pixel_buffer_start; // global variable
 
 void clear_screen();
 void wait_for_vsync();
+void draw_board(int game_board[BOARD_X][BOARD_Y]);
 void draw_line(int x0, int y0, int  x1, int y1, short int line_color);
 void draw_rectangle(int x, int y, int width, int height, short int color);
-void plot_pixel(int x, int y, short int line_color);
+void plot_pixel(int x, int y, short int color);
 void swap(int* x, int* y);
 
 int main(void) {
     volatile int * pixel_ctrl_ptr = (int *)0xFF203020;
 
-    // initialize location and direction of rectangles
-    int rects_x[TOTAL_RECTANGLES], rects_y[TOTAL_RECTANGLES],
-        rects_dx[TOTAL_RECTANGLES], rects_dy[TOTAL_RECTANGLES],
-        rects_color[TOTAL_RECTANGLES];
+    //initialize the game board, represents the screen. Each pixel here will
+    //contain the player number or 0 for none
+    int game_board[BOARD_X][BOARD_Y] = { 0 };
 
-    //randomize the rectangle initial position/direction
-    for(int i = 0; i < TOTAL_RECTANGLES; i++) {
-      rects_x[i] = rand()%SCREEN_X;
-      rects_y[i] = rand()&SCREEN_Y;
-      rects_dx[i] = (rand()%2)*2-1;
-      rects_dy[i] = (rand()%2)*2-1;
-      rects_color[i] = rand()%(0xFFFF);
+    //initialize player start positions
+    int player_x[NUM_PLAYERS] = {BOARD_X/8, BOARD_X - BOARD_X/8, BOARD_X/8, BOARD_X - BOARD_X/8};
+    int player_y[NUM_PLAYERS] = {BOARD_Y/8, BOARD_Y - BOARD_Y/8, BOARD_Y - BOARD_Y/8, BOARD_Y/8};
+
+    for(int i = 0; i < NUM_PLAYERS; i++) {
+      game_board[ player_x[i] ][ player_y[i] ] = i + 1;
     }
 
     /* set front pixel buffer to start of FPGA On-chip memory */
@@ -45,27 +47,10 @@ int main(void) {
     *(pixel_ctrl_ptr + 1) = 0xC0000000;
     pixel_buffer_start = *(pixel_ctrl_ptr + 1); // we draw on the back buffer
 
-    while (1)
-    {
-        clear_screen();
-
-        //draw lines between rectangles
-        for(int i = 0; i < TOTAL_RECTANGLES - 1; i++) {
-          draw_rectangle(rects_x[i], rects_y[i], 2, 2, rects_color[i]);
-          draw_line(rects_x[i], rects_y[i], rects_x[i+1], rects_y[i+1], rects_color[i]);
-        }
-        draw_rectangle(rects_x[TOTAL_RECTANGLES-1], rects_y[TOTAL_RECTANGLES-1], 2, 2, rects_color[TOTAL_RECTANGLES-1]);
-        draw_line(rects_x[TOTAL_RECTANGLES-1], rects_y[TOTAL_RECTANGLES-1], rects_x[0], rects_y[0], rects_color[TOTAL_RECTANGLES-1]);
-
-        //movement and adjust direction to bounce of edges of screen
-        for(int i = 0; i < TOTAL_RECTANGLES; i++) {
-          rects_x[i] += rects_dx[i];
-          rects_y[i] += rects_dy[i];
-
-
-          if(rects_x[i] <= 0 || rects_x[i] >= SCREEN_X) rects_dx[i] = rects_dx[i]*-1;
-          if(rects_y[i] <= 0 || rects_y[i] >= SCREEN_Y) rects_dy[i] = rects_dy[i]*-1;
-        }
+    int test = 0;
+    while (1) {
+    //  clear_screen();
+        draw_board(game_board);
 
         wait_for_vsync(); // swap front and back buffers on VGA vertical sync
         pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer
@@ -96,6 +81,28 @@ void wait_for_vsync() {
     status = *(pixel_ctrl_ptr + 3);
   }
 }
+
+
+//draws the game board
+void draw_board(int game_board[BOARD_X][BOARD_Y]) {
+  int board_to_screen_factor = SCREEN_X / BOARD_X;
+  short int player_colors[NUM_PLAYERS] = {0x07E0, 0xF800, 0x001F, 0xF81F};
+
+  for(int x = 0; x < SCREEN_X; x+= board_to_screen_factor) {
+    for(int y = 0; y < SCREEN_Y; y+= board_to_screen_factor) {
+      switch(game_board[x/board_to_screen_factor][y/board_to_screen_factor]) {
+        case 0: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, 0x0000); break;
+        case 1: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, player_colors[0]); break;
+        case 2: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, player_colors[1]); break;
+        case 3: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, player_colors[2]); break;
+        case 4: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, player_colors[3]); break;
+
+        default: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, 0x0000); break;
+      }
+    }
+  }
+}
+
 
 
 //draws a line using Bresenham's algorithm
@@ -132,14 +139,12 @@ void draw_line(int x0, int y0, int  x1, int y1, short int line_color) {
 }
 
 
-//draws a rectangle, centered around x and y
-void draw_rectangle(int x, int y, int half_width, int half_height, short int color) {
+//draws a rectangle of width x height starting at top left
+void draw_rectangle(int x, int y, int width, int height, short int color) {
   int init_x = x, init_y = y;
-  int final_x = x + half_width;
-  int final_y = y + half_height;
 
-  for(x = init_x - half_width; x <= final_x; x++) {
-    for(y = init_y - half_height; y <= final_y; y++) {
+  for(x = init_x; x < init_x + width; x++) {
+    for(y = init_y; y < init_y + height; y++) {
       //check boundaries
       if(x>=0 && y>=0 && x<SCREEN_X && y<SCREEN_Y) {
         plot_pixel(x, y, color);
@@ -150,8 +155,8 @@ void draw_rectangle(int x, int y, int half_width, int half_height, short int col
 
 
 //plots a pixel
-void plot_pixel(int x, int y, short int line_color) {
-    *(short int *)(pixel_buffer_start + (y << 10) + (x << 1)) = line_color;
+void plot_pixel(int x, int y, short int color) {
+    *(short int *)(pixel_buffer_start + (y << 10) + (x << 1)) = color;
 }
 
 
