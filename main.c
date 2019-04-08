@@ -9,14 +9,34 @@
 #include "main.h"
 
 volatile int pixel_buffer_start; // global variable
-int player_dx = 0;
-int player_dy = 0;
+
+volatile char byte1, byte2, byte3; // PS/2 variables
+
+volatile int timeout; // used to synchronize with the timer
+
+Player_State init_player_1 = {
+  BOARD_X/8, BOARD_Y/8, 1, 0, 1, 0x07E0, true
+};
+
+Player_State init_player_2 = {
+  BOARD_X - BOARD_X/8,  BOARD_Y - BOARD_Y/8, -1, 0, 2, 0xF800, true
+};
+
+Player_State init_player_3 = {
+   BOARD_X/8, BOARD_Y - BOARD_Y/8, 1, 0, 3, 0x001F, true
+};
+
+Player_State init_player_4 = {
+  BOARD_X - BOARD_X/8, BOARD_Y/8, -1, 0, 4, 0xF81F, true
+};
+
+Player_State* players_ptr;
 
 int main(void) {
-    disable_A9_interrupts ();	// disable interrupts in the A9 processor
     set_A9_IRQ_stack ();			// initialize the stack pointer for IRQ mode
     config_GIC ();					// configure the general interrupt controller
-    config_KEYs ();				// configure pushbutton KEYs to generate interrupts
+    config_PS2();  // configure PS/2 port to generate interrupts
+    //config_KEYs ();				// configure pushbutton KEYs to generate interrupts
 
     enable_A9_interrupts ();	// enable interrupts in the A9 processor
 
@@ -27,8 +47,13 @@ int main(void) {
     int game_board[BOARD_X][BOARD_Y] = { 0 };
 
     //initialize player start positions
-    int player_x[NUM_PLAYERS] = {BOARD_X/8, BOARD_X - BOARD_X/8, BOARD_X/8, BOARD_X - BOARD_X/8};
-    int player_y[NUM_PLAYERS] = {BOARD_Y/8, BOARD_Y - BOARD_Y/8, BOARD_Y - BOARD_Y/8, BOARD_Y/8};
+    Player_State players[4];
+
+    players[0] = init_player_1;
+    players[1] = init_player_2;
+    players[2] = init_player_3;
+    players[3] = init_player_4;
+    players_ptr = players;
 
     /* set front pixel buffer to start of FPGA On-chip memory */
     *(pixel_ctrl_ptr + 1) = FPGA_PIXEL_BUF_BASE; // first store the address in the
@@ -45,16 +70,66 @@ int main(void) {
     while (1) {
         int i;
         for(i = 0; i < NUM_PLAYERS; i++) {
-          game_board[ player_x[i] ][ player_y[i] ] = i + 1;
+          if(players[i].is_alive) {
+            game_board[ players[i].pos_x ][ players[i].pos_y ] = players[i].value;
+            players[i].pos_x += players[i].dx;
+            players[i].pos_y += players[i].dy;
+
+            if(game_board[players[i].pos_x][players[i].pos_y] != 0 ||
+                players[i].pos_x > BOARD_X || players[i].pos_y > BOARD_Y ||
+                players[i].pos_x < 0 || players[i].pos_y < 0
+            ) {
+                kill_player(players[i].value, game_board);
+                players[i].is_alive = false;
+            }
+          }
         }
-        draw_board(game_board);
+        draw_board(game_board, players);
 
         wait_for_vsync(); // swap front and back buffers on VGA vertical sync
         pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer
 
-        player_x[0] += player_dx;
-        player_y[0] += player_dy;
+      	HEX_PS2(byte1, byte2, byte3);
     }
+}
+
+/* setup the PS/2 interrupts */
+void config_PS2() {
+    volatile int * PS2_ptr = (int *)PS2_BASE; // PS/2 port address
+
+    *(PS2_ptr) = 0xFF; /* reset */
+    *(PS2_ptr + 1) =
+        0x1; /* write to the PS/2 Control register to enable interrupts */
+}
+
+/****************************************************************************************
+ * Subroutine to show a string of HEX data on the HEX displays
+****************************************************************************************/
+void HEX_PS2(char b1, char b2, char b3) {
+    volatile int * HEX3_HEX0_ptr = (int *)HEX3_HEX0_BASE;
+    volatile int * HEX5_HEX4_ptr = (int *)HEX5_HEX4_BASE;
+
+    /* SEVEN_SEGMENT_DECODE_TABLE gives the on/off settings for all segments in
+     * a single 7-seg display in the DE2 Media Computer, for the hex digits 0 -
+     * F */
+    unsigned char seven_seg_decode_table[] = {
+        0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07,
+        0x7F, 0x67, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71};
+    unsigned char hex_segs[] = {0, 0, 0, 0, 0, 0, 0, 0};
+    unsigned int  shift_buffer, nibble;
+    unsigned char code;
+    int           i;
+
+    shift_buffer = (b1 << 16) | (b2 << 8) | b3;
+    for (i = 0; i < 6; ++i) {
+        nibble = shift_buffer & 0x0000000F; // character is in rightmost nibble
+        code   = seven_seg_decode_table[nibble];
+        hex_segs[i]  = code;
+        shift_buffer = shift_buffer >> 4;
+    }
+    /* drive the hex displays */
+    *(HEX3_HEX0_ptr) = *(int *)(hex_segs);
+    *(HEX5_HEX4_ptr) = *(int *)(hex_segs + 4);
 }
 
 
@@ -84,19 +159,21 @@ void wait_for_vsync() {
 
 
 //draws the game board
-void draw_board(int game_board[BOARD_X][BOARD_Y]) {
+void draw_board(int game_board[BOARD_X][BOARD_Y], Player_State players[4]) {
   int board_to_screen_factor = SCREEN_X / BOARD_X;
-  short int player_colors[NUM_PLAYERS] = {0x07E0, 0xF800, 0x001F, 0xF81F};
 
-  int x, y;
-  for(x = 0; x < SCREEN_X; x+= board_to_screen_factor) {
-    for(y = 0; y < SCREEN_Y; y+= board_to_screen_factor) {
-      switch(game_board[x/board_to_screen_factor][y/board_to_screen_factor]) {
-        case 0: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, 0x0000); break;
-        case 1: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, player_colors[0]); break;
-        case 2: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, player_colors[1]); break;
-        case 3: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, player_colors[2]); break;
-        case 4: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, player_colors[3]); break;
+  int x, y, x_screen, y_screen;
+  for(x = 0; x < BOARD_X; x++) {
+    for(y = 0; y < BOARD_Y; y++) {
+      x_screen = x * board_to_screen_factor;
+      y_screen = y * board_to_screen_factor;
+
+      switch(game_board[x][y]) {
+        case 0: draw_rectangle(x_screen, y_screen, board_to_screen_factor, board_to_screen_factor, 0x0000); break;
+        case 1: draw_rectangle(x_screen, y_screen, board_to_screen_factor, board_to_screen_factor, players[0].color); break;
+        case 2: draw_rectangle(x_screen, y_screen, board_to_screen_factor, board_to_screen_factor, players[1].color); break;
+        case 3: draw_rectangle(x_screen, y_screen, board_to_screen_factor, board_to_screen_factor, players[2].color); break;
+        case 4: draw_rectangle(x_screen, y_screen, board_to_screen_factor, board_to_screen_factor, players[3].color); break;
 
         default: draw_rectangle(x, y, board_to_screen_factor, board_to_screen_factor, 0x0000); break;
       }
@@ -147,7 +224,7 @@ void draw_rectangle(int x, int y, int width, int height, short int color) {
   for(x = init_x; x < init_x + width; x++) {
     for(y = init_y; y < init_y + height; y++) {
       //check boundaries
-      if(x>=0 && y>=0 && x<SCREEN_X && y<SCREEN_Y) {
+      if(x>=0 && y>=0 && x<SCREEN_X-1 && y<SCREEN_Y-1) {
         plot_pixel(x, y, color);
       }
     }
@@ -179,22 +256,33 @@ void pushbutton_ISR( void )
 
 	if (press & 0x1) {				// KEY0
 		LED_bits = 0b1;
-    player_dx = 1;
-    player_dy = 0;
+    players_ptr[0].dx = players_ptr[0].dx == -1 ? -1 : 1;
+    players_ptr[0].dy = 0;
 	} else if (press & 0x2)	{				// KEY1
 		LED_bits = 0b10;
-    player_dx = -1;
-    player_dy = 0;
+    players_ptr[0].dx = players_ptr[0].dx == 1 ? 1 : -1;
+    players_ptr[0].dy = 0;
 	} else if (press & 0x4) {
 		LED_bits = 0b100;
-    player_dy = -1;
-    player_dx = 0;
+    players_ptr[0].dy = players_ptr[0].dy == 1 ? 1 : -1;
+    players_ptr[0].dx = 0;
 	} else if (press & 0x8) {
 		LED_bits = 0b1000;
-    player_dy = 1;
-    player_dx = 0;
+    players_ptr[0].dy = players_ptr[0].dy == -1 ? -1 : 1;
+    players_ptr[0].dx = 0;
   }
 
 	*LED_ptr = LED_bits;
 	return;
+}
+
+void kill_player(int player, int game_board[BOARD_X][BOARD_Y]) {
+  int x, y;
+
+  for(x = 0; x < BOARD_X; x++) {
+    for(y = 0; y < BOARD_Y; y++){
+      if(game_board[x][y] == player)
+        game_board[x][y] = 0;
+    }
+  }
 }

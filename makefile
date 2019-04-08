@@ -28,7 +28,7 @@ OCFLAGS		:= -O srec
 
 # Files
 HDRS		:=
-SRCS		:= exceptions.c main.c
+SRCS		:= exceptions.c main.c PS2_ISR.c
 OBJS		:= $(patsubst %, %.o, $(SRCS))
 
 # Targets

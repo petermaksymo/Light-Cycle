@@ -3,7 +3,7 @@
     <system>
         <sample_system_title>DE1-SoC Computer for ARM Cortex-A9</sample_system_title>
         <board>DE1-SoC</board>
-        <cable>DE-SoC [USB-1]</cable>
+        <cable>null</cable>
         <processor>ARM_A9_HPS_arm_a9_0</processor>
         <reset_processor_during_load>true</reset_processor_during_load>
         <terminal>JTAG_UART_for_ARM_0</terminal>
