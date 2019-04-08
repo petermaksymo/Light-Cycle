@@ -14,6 +14,8 @@ volatile char byte1, byte2, byte3; // PS/2 variables
 
 volatile int timeout; // used to synchronize with the timer
 
+volatile int* switches_ptr = SW_BASE;
+
 Player_State init_player_1 = {
   BOARD_X/8, BOARD_Y/8, 1, 0, 1, 0x07E0, true
 };
@@ -31,6 +33,8 @@ Player_State init_player_4 = {
 };
 
 Player_State* players_ptr;
+
+volatile bool game_start = false;
 
 int main(void) {
     set_A9_IRQ_stack ();			// initialize the stack pointer for IRQ mode
@@ -67,10 +71,38 @@ int main(void) {
     *(pixel_ctrl_ptr + 1) = SDRAM_BASE;
     pixel_buffer_start = *(pixel_ctrl_ptr + 1); // we draw on the back buffer
 
+    while(!game_start) {
+      int i;
+      for(i = 0; i < NUM_PLAYERS; i++) {
+        //set number of players (can be dynamic for shenanigans)
+        if((*switches_ptr & 0x300) >> 8 < i) {
+          players[i].is_alive = false;
+          game_board[ players[i].pos_x ][ players[i].pos_y ] = 0;
+        } else {
+          players[i].is_alive = true;
+          game_board[ players[i].pos_x ][ players[i].pos_y ] = players[i].value;
+        }
+      }
+
+      draw_board(game_board, players);
+      wait_for_vsync(); // swap front and back buffers on VGA vertical sync
+      pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer
+    }
+
+    int speed_counter = 0;
+    int score = 0, score_counter = 0;
+    bool game_done = false;
     while (1) {
-        int i;
+      int speed_limit = *switches_ptr & 0b1111;
+      speed_counter++;
+      int i;
+      //use speed_counter and speed_limit to adjust the speed of players, higher is slower
+      if(speed_counter > speed_limit) {
+        speed_counter = 0;
+        game_done = true;
         for(i = 0; i < NUM_PLAYERS; i++) {
           if(players[i].is_alive) {
+            game_done = false;
             game_board[ players[i].pos_x ][ players[i].pos_y ] = players[i].value;
             players[i].pos_x += players[i].dx;
             players[i].pos_y += players[i].dy;
@@ -84,12 +116,20 @@ int main(void) {
             }
           }
         }
-        draw_board(game_board, players);
+      }
 
-        wait_for_vsync(); // swap front and back buffers on VGA vertical sync
-        pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer
+      draw_board(game_board, players);
 
-      	HEX_PS2(byte1, byte2, byte3);
+      update_score(score);
+      score_counter ++;
+      if(score_counter == 15 && !game_done) {
+        score ++;
+        score_counter = 0;
+      }
+
+      wait_for_vsync(); // swap front and back buffers on VGA vertical sync
+      pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer
+
     }
 }
 
@@ -105,7 +145,7 @@ void config_PS2() {
 /****************************************************************************************
  * Subroutine to show a string of HEX data on the HEX displays
 ****************************************************************************************/
-void HEX_PS2(char b1, char b2, char b3) {
+void update_score(int score) {
     volatile int * HEX3_HEX0_ptr = (int *)HEX3_HEX0_BASE;
     volatile int * HEX5_HEX4_ptr = (int *)HEX5_HEX4_BASE;
 
@@ -120,7 +160,7 @@ void HEX_PS2(char b1, char b2, char b3) {
     unsigned char code;
     int           i;
 
-    shift_buffer = (b1 << 16) | (b2 << 8) | b3;
+    shift_buffer = (score%10) | ((score/10)%10 << 4) | ((score/100)%10 << 8) | ((score/1000)%10 << 12);
     for (i = 0; i < 6; ++i) {
         nibble = shift_buffer & 0x0000000F; // character is in rightmost nibble
         code   = seven_seg_decode_table[nibble];
@@ -224,7 +264,7 @@ void draw_rectangle(int x, int y, int width, int height, short int color) {
   for(x = init_x; x < init_x + width; x++) {
     for(y = init_y; y < init_y + height; y++) {
       //check boundaries
-      if(x>=0 && y>=0 && x<SCREEN_X-1 && y<SCREEN_Y-1) {
+      if(x>=0 && y>=0 && x<SCREEN_X && y<SCREEN_Y) {
         plot_pixel(x, y, color);
       }
     }
@@ -243,37 +283,6 @@ void swap(int* x, int* y) {
   int temp = *y;
   *y = *x;
   *x = temp;
-}
-
-void pushbutton_ISR( void )
-{
-	volatile int * KEY_ptr = (int *) KEY_BASE;
-	volatile int * LED_ptr = (int *) LED_BASE;
-	int press, LED_bits;
-
-	press = *(KEY_ptr + 3);					// read the pushbutton interrupt register
-	*(KEY_ptr + 3) = press;					// Clear the interrupt
-
-	if (press & 0x1) {				// KEY0
-		LED_bits = 0b1;
-    players_ptr[0].dx = players_ptr[0].dx == -1 ? -1 : 1;
-    players_ptr[0].dy = 0;
-	} else if (press & 0x2)	{				// KEY1
-		LED_bits = 0b10;
-    players_ptr[0].dx = players_ptr[0].dx == 1 ? 1 : -1;
-    players_ptr[0].dy = 0;
-	} else if (press & 0x4) {
-		LED_bits = 0b100;
-    players_ptr[0].dy = players_ptr[0].dy == 1 ? 1 : -1;
-    players_ptr[0].dx = 0;
-	} else if (press & 0x8) {
-		LED_bits = 0b1000;
-    players_ptr[0].dy = players_ptr[0].dy == -1 ? -1 : 1;
-    players_ptr[0].dx = 0;
-  }
-
-	*LED_ptr = LED_bits;
-	return;
 }
 
 void kill_player(int player, int game_board[BOARD_X][BOARD_Y]) {

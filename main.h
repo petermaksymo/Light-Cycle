@@ -28,7 +28,7 @@ typedef struct Player_State{
 
 void config_PS2(void);
 
-void HEX_PS2(char b1, char b2, char b3);
+void update_score(int score);
 
 //sets all pixels in the screen to black
 void clear_screen();
@@ -50,8 +50,5 @@ void plot_pixel(int x, int y, short int color);
 
 //swap two integers
 void swap(int* x, int* y);
-
-//pushbutton interrupt service routine
-void pushbutton_ISR (void);
 
 void kill_player(int player, int game_board[BOARD_X][BOARD_Y]);

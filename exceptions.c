@@ -33,7 +33,8 @@ void __attribute__ ((interrupt)) __cs3_isr_pabort (void)
 
 void __attribute__ ((interrupt)) __cs3_isr_dabort (void)
 {
-    while(1);
+		return; //currently fixes a bug
+		//while(1);
 }
 
 void __attribute__ ((interrupt)) __cs3_isr_irq (void)
@@ -98,7 +99,7 @@ void config_GIC(void)
 
   	// Set Interrupt Priority Mask Register (ICCPMR). Enable interrupts for lowest priority
 	address = MPCORE_GIC_CPUIF + ICCPMR;
-  	*((int *) address) = 0xFFFF;       
+  	*((int *) address) = 0xFFFF;
 
   	// Set CPU Interface Control Register (ICCICR). Enable signaling of interrupts
 	address = MPCORE_GIC_CPUIF + ICCICR;
